@@ -53,8 +53,8 @@ int main()
     const float tileSize = 1.0f;
     const float walkSpeed = 1.5f;
     const float runSpeed = 5.0f;
-    const float patrolSpeed = 1.2f;
-    const float patrolStamina = 10.0f;
+    const float patrolSpeed = 4.2f;
+    const float patrolStamina = 20.0f;
 
     FastNoiseLite noise;
     noise.SetSeed(std::random_device{}());
