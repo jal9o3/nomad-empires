@@ -3,9 +3,10 @@
 #include <vector>
 #include <termios.h>
 #include <unistd.h>
+#include <chrono>
 #include "FastNoiseLite.h"
 
-// Disable canonical input and echoing
+// Configure terminal raw mode for instant key reading
 void setRawMode(bool enable)
 {
     static struct termios oldt;
@@ -25,8 +26,10 @@ void setRawMode(bool enable)
 
 int main()
 {
-    const int width = 80;
-    const int height = 25;
+    const int width = 80;        // 80 meters
+    const int height = 25;       // 25 meters
+    const float tileSize = 1.0f; // 1 m² per tile
+    const float speed = 1.5f;    // 1.5 meters per second
 
     // Generate terrain using Perlin noise
     FastNoiseLite noise;
@@ -54,43 +57,68 @@ int main()
         for (int x = 0; x < width; ++x)
             map[y][x] = getSymbol(noise.GetNoise((float)x, (float)y));
 
-    // Cursor position
-    int cx = width / 2;
-    int cy = height / 2;
+    // Cursor position in meters (float for smooth motion)
+    float cx = width / 2.0f;
+    float cy = height / 2.0f;
 
     setRawMode(true);
 
     char key = 0;
+    auto lastTime = std::chrono::steady_clock::now();
+
     while (key != 'q')
-    { // Press 'q' to quit
+    { // press 'q' to quit
+        // Measure elapsed time
+        auto now = std::chrono::steady_clock::now();
+        std::chrono::duration<float> deltaTime = now - lastTime;
+        lastTime = now;
+        float dt = deltaTime.count();
+
+        // Non-blocking input
+        read(STDIN_FILENO, &key, 1);
+
+        // Move based on time and speed
+        float dx = 0, dy = 0;
+        if (key == 'w')
+            dy -= speed * dt / tileSize;
+        if (key == 's')
+            dy += speed * dt / tileSize;
+        if (key == 'a')
+            dx -= speed * dt / tileSize;
+        if (key == 'd')
+            dx += speed * dt / tileSize;
+
+        cx += dx;
+        cy += dy;
+
+        // Clamp position to map bounds
+        if (cx < 0)
+            cx = 0;
+        if (cy < 0)
+            cy = 0;
+        if (cx > width - 1)
+            cx = width - 1;
+        if (cy > height - 1)
+            cy = height - 1;
+
         // Clear screen
         std::cout << "\033[H\033[J";
 
-        // Render terrain with cursor
+        // Render
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
             {
-                if (x == cx && y == cy)
-                    std::cout << 'X'; // cursor marker
+                if (x == (int)cx && y == (int)cy)
+                    std::cout << 'X';
                 else
                     std::cout << map[y][x];
             }
             std::cout << '\n';
         }
 
-        // Read key press (non-blocking)
-        read(STDIN_FILENO, &key, 1);
-
-        // Move cursor based on key
-        if (key == 'w' && cy > 0)
-            cy--;
-        else if (key == 's' && cy < height - 1)
-            cy++;
-        else if (key == 'a' && cx > 0)
-            cx--;
-        else if (key == 'd' && cx < width - 1)
-            cx++;
+        // Small delay to reduce flicker
+        usleep(16000); // ~60 FPS
     }
 
     setRawMode(false);
