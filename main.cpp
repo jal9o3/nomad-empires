@@ -6,7 +6,7 @@
 #include <chrono>
 #include "FastNoiseLite.h"
 
-// Terminal raw mode
+// Enable or disable raw terminal input mode
 void setRawMode(bool enable)
 {
     static struct termios oldt;
@@ -24,7 +24,7 @@ void setRawMode(bool enable)
     }
 }
 
-// Generate one chunk of terrain
+// Generate one terrain chunk
 void generateChunk(std::vector<std::vector<char>> &map,
                    FastNoiseLite &noise,
                    int chunkX, int chunkY)
@@ -45,7 +45,6 @@ void generateChunk(std::vector<std::vector<char>> &map,
         return '@';
     };
 
-    // Offset coordinates by chunk position
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
         {
@@ -57,12 +56,13 @@ void generateChunk(std::vector<std::vector<char>> &map,
 
 int main()
 {
-    const int width = 80;  // chunk width in meters
-    const int height = 25; // chunk height in meters
+    const int width = 80;
+    const int height = 25;
     const float tileSize = 1.0f;
-    const float speed = 1.5f;
+    const float walkSpeed = 1.5f;
+    const float runSpeed = 5.0f;
 
-    // Configure noise generator
+    // Noise setup
     FastNoiseLite noise;
     noise.SetSeed(std::random_device{}());
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
@@ -73,7 +73,6 @@ int main()
     int chunkY = 0;
     generateChunk(map, noise, chunkX, chunkY);
 
-    // Cursor position (local to chunk)
     float cx = width / 2.0f;
     float cy = height / 2.0f;
 
@@ -90,14 +89,18 @@ int main()
 
         read(STDIN_FILENO, &key, 1);
 
+        // Detect Shift by uppercase keys
+        bool shift = (key == 'W' || key == 'A' || key == 'S' || key == 'D');
+        float speed = shift ? runSpeed : walkSpeed;
+
         float dx = 0, dy = 0;
-        if (key == 'w')
+        if (key == 'w' || key == 'W')
             dy -= speed * dt / tileSize;
-        if (key == 's')
+        if (key == 's' || key == 'S')
             dy += speed * dt / tileSize;
-        if (key == 'a')
+        if (key == 'a' || key == 'A')
             dx -= speed * dt / tileSize;
-        if (key == 'd')
+        if (key == 'd' || key == 'D')
             dx += speed * dt / tileSize;
 
         cx += dx;
@@ -116,7 +119,6 @@ int main()
             cx -= width;
             generateChunk(map, noise, chunkX, chunkY);
         }
-
         if (cy < 0)
         {
             chunkY -= 1;
@@ -130,7 +132,7 @@ int main()
             generateChunk(map, noise, chunkX, chunkY);
         }
 
-        // Render
+        // Draw
         std::cout << "\033[H\033[J";
         for (int y = 0; y < height; ++y)
         {
@@ -144,8 +146,8 @@ int main()
             std::cout << '\n';
         }
 
-        std::cout << "Chunk: (" << chunkX << ", " << chunkY << ")\n";
-        std::cout << "Position: " << cx << "m, " << cy << "m\n";
+        std::cout << "Chunk: (" << chunkX << ", " << chunkY << ") | "
+                  << "Speed: " << speed << " m/s\n";
 
         usleep(16000); // ~60 FPS
     }
