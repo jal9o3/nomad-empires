@@ -1,48 +1,36 @@
 #include <iostream>
-#include <string>
-#include <fstream>
-using namespace std;
+#include "FastNoiseLite.h"
 
-class Screen {
-    public:
-        void show(string sourcefile) {
-            // Loads from a text file and displays the contents to the stream
-            string text;
-            ifstream ifs(sourcefile);
+int main()
+{
+    const int width = 80;
+    const int height = 25;
 
-            text.assign((istreambuf_iterator<char>(ifs)),
-                        (istreambuf_iterator<char>()));
-            
-            cout << text;
+    FastNoiseLite noise;
+    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noise.SetFrequency(0.05f);
+
+    auto getSymbol = [](float v)
+    {
+        if (v < -0.3f)
+            return '.';
+        if (v < 0.0f)
+            return ':';
+        if (v < 0.3f)
+            return '*';
+        if (v < 0.6f)
+            return '#';
+        return '@';
+    };
+
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            float v = noise.GetNoise((float)x, (float)y);
+            std::cout << getSymbol(v);
         }
-
-};
-
-
-int main() {
-    int selection;
-    Screen currentScreen;
-    
-    cout << "NOMAD EMPIRES" << endl;
-    cout << "1 - Start" << endl;
-    cout << "2 - Settings" << endl;
-    cout << "3 - Quit" << endl;
-
-    cout << "Select an option: ";
-    cin >> selection;
-
-    switch (selection) {
-        case 1:
-            Screen().show("PlayScreen.txt");
-            break;
-        case 2:
-            cout << "Opening settings..." << endl;
-            break;
-        case 3:
-            cout << "Quitting..." << endl;
-            break;
-        default:
-            cout << "Invalid option" << endl;
+        std::cout << '\n';
     }
 
     return 0;
