@@ -1,4 +1,5 @@
 #include <iostream>
+#include <random>
 #include "FastNoiseLite.h"
 
 int main()
@@ -7,6 +8,8 @@ int main()
     const int height = 25;
 
     FastNoiseLite noise;
+    std::mt19937 rng(std::random_device{}());
+    noise.SetSeed(static_cast<int>(rng()));
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
     noise.SetFrequency(0.05f);
 
