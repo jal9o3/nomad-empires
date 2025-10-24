@@ -6,7 +6,7 @@
 #include <chrono>
 #include "FastNoiseLite.h"
 
-// Configure terminal raw mode for instant key reading
+// Terminal raw mode
 void setRawMode(bool enable)
 {
     static struct termios oldt;
@@ -24,19 +24,13 @@ void setRawMode(bool enable)
     }
 }
 
-int main()
+// Generate one chunk of terrain
+void generateChunk(std::vector<std::vector<char>> &map,
+                   FastNoiseLite &noise,
+                   int chunkX, int chunkY)
 {
-    const int width = 80;        // 80 meters
-    const int height = 25;       // 25 meters
-    const float tileSize = 1.0f; // 1 m² per tile
-    const float speed = 1.5f;    // 1.5 meters per second
-
-    // Generate terrain using Perlin noise
-    FastNoiseLite noise;
-    std::mt19937 rng(std::random_device{}());
-    noise.SetSeed(static_cast<int>(rng()));
-    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    noise.SetFrequency(0.05f);
+    const int width = map[0].size();
+    const int height = map.size();
 
     auto getSymbol = [](float v)
     {
@@ -51,33 +45,51 @@ int main()
         return '@';
     };
 
-    // Build map
-    std::vector<std::vector<char>> map(height, std::vector<char>(width));
+    // Offset coordinates by chunk position
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x)
-            map[y][x] = getSymbol(noise.GetNoise((float)x, (float)y));
+        {
+            float wx = (chunkX * width + x);
+            float wy = (chunkY * height + y);
+            map[y][x] = getSymbol(noise.GetNoise(wx, wy));
+        }
+}
 
-    // Cursor position in meters (float for smooth motion)
+int main()
+{
+    const int width = 80;  // chunk width in meters
+    const int height = 25; // chunk height in meters
+    const float tileSize = 1.0f;
+    const float speed = 1.5f;
+
+    // Configure noise generator
+    FastNoiseLite noise;
+    noise.SetSeed(std::random_device{}());
+    noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    noise.SetFrequency(0.05f);
+
+    std::vector<std::vector<char>> map(height, std::vector<char>(width));
+    int chunkX = 0;
+    int chunkY = 0;
+    generateChunk(map, noise, chunkX, chunkY);
+
+    // Cursor position (local to chunk)
     float cx = width / 2.0f;
     float cy = height / 2.0f;
 
     setRawMode(true);
-
     char key = 0;
     auto lastTime = std::chrono::steady_clock::now();
 
     while (key != 'q')
-    { // press 'q' to quit
-        // Measure elapsed time
+    {
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> deltaTime = now - lastTime;
         lastTime = now;
         float dt = deltaTime.count();
 
-        // Non-blocking input
         read(STDIN_FILENO, &key, 1);
 
-        // Move based on time and speed
         float dx = 0, dy = 0;
         if (key == 'w')
             dy -= speed * dt / tileSize;
@@ -91,20 +103,35 @@ int main()
         cx += dx;
         cy += dy;
 
-        // Clamp position to map bounds
+        // Handle chunk transitions
         if (cx < 0)
-            cx = 0;
-        if (cy < 0)
-            cy = 0;
-        if (cx > width - 1)
-            cx = width - 1;
-        if (cy > height - 1)
-            cy = height - 1;
+        {
+            chunkX -= 1;
+            cx += width;
+            generateChunk(map, noise, chunkX, chunkY);
+        }
+        else if (cx >= width)
+        {
+            chunkX += 1;
+            cx -= width;
+            generateChunk(map, noise, chunkX, chunkY);
+        }
 
-        // Clear screen
-        std::cout << "\033[H\033[J";
+        if (cy < 0)
+        {
+            chunkY -= 1;
+            cy += height;
+            generateChunk(map, noise, chunkX, chunkY);
+        }
+        else if (cy >= height)
+        {
+            chunkY += 1;
+            cy -= height;
+            generateChunk(map, noise, chunkX, chunkY);
+        }
 
         // Render
+        std::cout << "\033[H\033[J";
         for (int y = 0; y < height; ++y)
         {
             for (int x = 0; x < width; ++x)
@@ -117,7 +144,9 @@ int main()
             std::cout << '\n';
         }
 
-        // Small delay to reduce flicker
+        std::cout << "Chunk: (" << chunkX << ", " << chunkY << ")\n";
+        std::cout << "Position: " << cx << "m, " << cy << "m\n";
+
         usleep(16000); // ~60 FPS
     }
 
