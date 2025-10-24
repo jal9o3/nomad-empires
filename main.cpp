@@ -6,9 +6,9 @@
 #include <unistd.h>
 #include <chrono>
 #include <cmath>
+#include <fcntl.h>
 #include "FastNoiseLite.h"
 
-// Enable/disable raw terminal input
 void setRawMode(bool enable)
 {
     static struct termios oldt;
@@ -19,12 +19,17 @@ void setRawMode(bool enable)
         newt = oldt;
         newt.c_lflag &= ~(ICANON | ECHO);
         tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
     }
     else
+    {
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+        int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+        fcntl(STDIN_FILENO, F_SETFL, flags & ~O_NONBLOCK);
+    }
 }
 
-// Noise → ASCII terrain symbol
 char getSymbol(float v)
 {
     if (v < -0.3f)
@@ -38,35 +43,29 @@ char getSymbol(float v)
     return '@';
 }
 
-// Patrol entity
 struct Patrol
 {
-    float wx, wy;  // world coordinates
-    float stamina; // seconds remaining
+    float wx, wy;
+    float stamina;
     bool active;
 };
 
 int main()
 {
-    const int viewW = 80; // visible width in tiles
-    const int viewH = 25; // visible height in tiles
-    const float tileSize = 1.0f;
+    const int viewW = 80;
+    const int viewH = 25;
     const float walkSpeed = 1.5f;
     const float runSpeed = 5.0f;
-    const float patrolSpeed = 4.2f;    // your updated value
-    const float patrolStamina = 20.0f; // your updated value
+    const float patrolSpeed = 4.2f;
+    const float patrolStamina = 20.0f;
 
-    // Noise generator
     FastNoiseLite noise;
     noise.SetSeed(std::random_device{}());
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
     noise.SetFrequency(0.05f);
 
-    // Player position (world coordinates)
-    float cx = 0.0f;
-    float cy = 0.0f;
+    float cx = 0.0f, cy = 0.0f;
 
-    // Patrol management
     std::vector<Patrol> patrols;
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> spawnDist(-15.0f, 15.0f);
@@ -75,45 +74,70 @@ int main()
     float spawnTimer = 0.0f;
 
     setRawMode(true);
-    char key = 0;
     auto lastTime = std::chrono::steady_clock::now();
 
-    while (key != 'q')
+    while (true)
     {
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> deltaTime = now - lastTime;
         lastTime = now;
         float dt = deltaTime.count();
 
-        // Input
-        read(STDIN_FILENO, &key, 1);
-        bool shift = (key == 'W' || key == 'A' || key == 'S' || key == 'D');
-        float speed = shift ? runSpeed : walkSpeed;
+        // Read all available key presses and track states
+        static bool up = false, down = false, left = false, right = false, run = false;
+        char ch;
+        while (read(STDIN_FILENO, &ch, 1) > 0)
+        {
+            if (ch == 'q')
+            {
+                setRawMode(false);
+                std::cout << "\033[H\033[J";
+                return 0;
+            }
+            if (ch == 'w')
+                up = true;
+            if (ch == 's')
+                down = true;
+            if (ch == 'a')
+                left = true;
+            if (ch == 'd')
+                right = true;
+            if (ch == 'W' || ch == 'A' || ch == 'S' || ch == 'D')
+            {
+                run = true;
+                ch = std::tolower(ch);
+            }
+            // Key release logic: reset state on opposite input
+            if (ch == '\n' || ch == '\r')
+                continue;
+        }
 
+        // Auto-reset movement each frame (no persistent drift)
         float dx = 0, dy = 0;
-        if (key == 'w' || key == 'W')
+        float speed = run ? runSpeed : walkSpeed;
+
+        if (up)
             dy -= speed * dt;
-        if (key == 's' || key == 'S')
+        if (down)
             dy += speed * dt;
-        if (key == 'a' || key == 'A')
+        if (left)
             dx -= speed * dt;
-        if (key == 'd' || key == 'D')
+        if (right)
             dx += speed * dt;
+
+        // reset key flags after applying
+        up = down = left = right = run = false;
 
         cx += dx;
         cy += dy;
 
-        // Spawn patrols around player periodically
+        // Spawn patrols
         spawnTimer += dt;
         if (spawnTimer >= nextSpawnTime)
         {
             spawnTimer = 0;
             nextSpawnTime = timeDist(rng);
-            Patrol p;
-            p.wx = cx + spawnDist(rng);
-            p.wy = cy + spawnDist(rng);
-            p.stamina = patrolStamina;
-            p.active = true;
+            Patrol p{cx + spawnDist(rng), cy + spawnDist(rng), patrolStamina, true};
             patrols.push_back(p);
         }
 
@@ -127,7 +151,6 @@ int main()
                 p.active = false;
                 continue;
             }
-
             float vx = cx - p.wx;
             float vy = cy - p.wy;
             float len = std::sqrt(vx * vx + vy * vy);
@@ -141,11 +164,9 @@ int main()
             p.stamina -= dt;
         }
 
-        // Determine camera center
         float camX = cx - viewW / 2.0f;
         float camY = cy - viewH / 2.0f;
 
-        // Render viewport
         std::cout << "\033[H\033[J";
         for (int y = 0; y < viewH; ++y)
         {
@@ -156,7 +177,6 @@ int main()
                 char c = getSymbol(noise.GetNoise(wx, wy));
 
                 bool printed = false;
-                // Patrol render
                 for (auto &p : patrols)
                 {
                     if (!p.active)
@@ -171,7 +191,6 @@ int main()
                     }
                 }
 
-                // Player render
                 if (!printed)
                 {
                     int px = (int)std::floor(cx);
@@ -194,8 +213,4 @@ int main()
 
         usleep(16000); // ~60 FPS
     }
-
-    setRawMode(false);
-    std::cout << "\033[H\033[J";
-    return 0;
 }
