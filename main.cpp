@@ -73,18 +73,22 @@ int main()
     float nextSpawnTime = timeDist(rng);
     float spawnTimer = 0.0f;
 
+    // key hold timestamps
+    using clock = std::chrono::steady_clock;
+    clock::time_point t_up{}, t_down{}, t_left{}, t_right{}, t_run{};
+    const float keyTimeout = 0.16f; // seconds: consider key held while recent
+
     setRawMode(true);
-    auto lastTime = std::chrono::steady_clock::now();
+    auto lastTime = clock::now();
 
     while (true)
     {
-        auto now = std::chrono::steady_clock::now();
+        auto now = clock::now();
         std::chrono::duration<float> deltaTime = now - lastTime;
         lastTime = now;
         float dt = deltaTime.count();
 
-        // Read all available key presses and track states
-        static bool up = false, down = false, left = false, right = false, run = false;
+        // Read all available key presses and update timestamps
         char ch;
         while (read(STDIN_FILENO, &ch, 1) > 0)
         {
@@ -94,26 +98,56 @@ int main()
                 std::cout << "\033[H\033[J";
                 return 0;
             }
+            // movement keys (lowercase)
             if (ch == 'w')
-                up = true;
+                t_up = now;
             if (ch == 's')
-                down = true;
+                t_down = now;
             if (ch == 'a')
-                left = true;
+                t_left = now;
             if (ch == 'd')
-                right = true;
-            if (ch == 'W' || ch == 'A' || ch == 'S' || ch == 'D')
+                t_right = now;
+            // uppercase indicates Shift held for that event
+            if (ch == 'W')
             {
-                run = true;
-                ch = std::tolower(ch);
+                t_up = now;
+                t_run = now;
             }
-            // Key release logic: reset state on opposite input
-            if (ch == '\n' || ch == '\r')
-                continue;
+            if (ch == 'S')
+            {
+                t_down = now;
+                t_run = now;
+            }
+            if (ch == 'A')
+            {
+                t_left = now;
+                t_run = now;
+            }
+            if (ch == 'D')
+            {
+                t_right = now;
+                t_run = now;
+            }
+            // ignore other chars
         }
 
-        // Auto-reset movement each frame (no persistent drift)
-        float dx = 0, dy = 0;
+        // Determine which keys are currently considered held
+        auto held = [&](const clock::time_point &t) -> bool
+        {
+            if (t == clock::time_point{})
+                return false;
+            std::chrono::duration<float> age = now - t;
+            return age.count() < keyTimeout;
+        };
+
+        bool up = held(t_up);
+        bool down = held(t_down);
+        bool left = held(t_left);
+        bool right = held(t_right);
+        bool run = held(t_run);
+
+        // Movement vector
+        float dx = 0.0f, dy = 0.0f;
         float speed = run ? runSpeed : walkSpeed;
 
         if (up)
@@ -125,13 +159,10 @@ int main()
         if (right)
             dx += speed * dt;
 
-        // reset key flags after applying
-        up = down = left = right = run = false;
-
         cx += dx;
         cy += dy;
 
-        // Spawn patrols
+        // spawn patrols
         spawnTimer += dt;
         if (spawnTimer >= nextSpawnTime)
         {
@@ -141,7 +172,7 @@ int main()
             patrols.push_back(p);
         }
 
-        // Update patrols
+        // update patrols
         for (auto &p : patrols)
         {
             if (!p.active)
@@ -209,8 +240,13 @@ int main()
                                         { return p.active; });
 
         std::cout << "Pos: (" << cx << ", " << cy << ")  "
-                  << "Active patrols: " << activeCount << "\n";
+                  << "Active patrols: " << activeCount << "  "
+                  << "Run: " << (run ? "YES" : "no") << "\n";
 
         usleep(16000); // ~60 FPS
     }
+
+    // unreachable
+    setRawMode(false);
+    return 0;
 }
