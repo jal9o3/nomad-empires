@@ -8,7 +8,7 @@
 #include <cmath>
 #include "FastNoiseLite.h"
 
-// Terminal raw mode
+// Enable/disable raw terminal input
 void setRawMode(bool enable)
 {
     static struct termios oldt;
@@ -24,7 +24,7 @@ void setRawMode(bool enable)
         tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
 }
 
-// Get terrain symbol based on noise value
+// Noise → ASCII terrain symbol
 char getSymbol(float v)
 {
     if (v < -0.3f)
@@ -41,34 +41,35 @@ char getSymbol(float v)
 // Patrol entity
 struct Patrol
 {
-    float wx, wy;  // world coordinates (meters)
-    float stamina; // seconds left to chase
+    float wx, wy;  // world coordinates
+    float stamina; // seconds remaining
     bool active;
 };
 
 int main()
 {
-    const int chunkW = 80;
-    const int chunkH = 25;
+    const int viewW = 80; // visible width in tiles
+    const int viewH = 25; // visible height in tiles
     const float tileSize = 1.0f;
     const float walkSpeed = 1.5f;
     const float runSpeed = 5.0f;
-    const float patrolSpeed = 4.2f;
-    const float patrolStamina = 20.0f;
+    const float patrolSpeed = 4.2f;    // your updated value
+    const float patrolStamina = 20.0f; // your updated value
 
+    // Noise generator
     FastNoiseLite noise;
     noise.SetSeed(std::random_device{}());
     noise.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
     noise.SetFrequency(0.05f);
 
-    // Player world position
+    // Player position (world coordinates)
     float cx = 0.0f;
     float cy = 0.0f;
 
     // Patrol management
     std::vector<Patrol> patrols;
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> spawnDist(-10.0f, 10.0f);
+    std::uniform_real_distribution<float> spawnDist(-15.0f, 15.0f);
     std::uniform_real_distribution<float> timeDist(5.0f, 12.0f);
     float nextSpawnTime = timeDist(rng);
     float spawnTimer = 0.0f;
@@ -84,12 +85,11 @@ int main()
         lastTime = now;
         float dt = deltaTime.count();
 
-        // Read key input
+        // Input
         read(STDIN_FILENO, &key, 1);
         bool shift = (key == 'W' || key == 'A' || key == 'S' || key == 'D');
         float speed = shift ? runSpeed : walkSpeed;
 
-        // Player motion
         float dx = 0, dy = 0;
         if (key == 'w' || key == 'W')
             dy -= speed * dt;
@@ -103,7 +103,7 @@ int main()
         cx += dx;
         cy += dy;
 
-        // Spawn patrols periodically
+        // Spawn patrols around player periodically
         spawnTimer += dt;
         if (spawnTimer >= nextSpawnTime)
         {
@@ -141,42 +141,42 @@ int main()
             p.stamina -= dt;
         }
 
-        // Determine visible chunk coordinates
-        int chunkX = std::floor(cx / chunkW);
-        int chunkY = std::floor(cy / chunkH);
+        // Determine camera center
+        float camX = cx - viewW / 2.0f;
+        float camY = cy - viewH / 2.0f;
 
-        // Render visible area
+        // Render viewport
         std::cout << "\033[H\033[J";
-        for (int y = 0; y < chunkH; ++y)
+        for (int y = 0; y < viewH; ++y)
         {
-            for (int x = 0; x < chunkW; ++x)
+            for (int x = 0; x < viewW; ++x)
             {
-                float wx = chunkX * chunkW + x;
-                float wy = chunkY * chunkH + y;
+                float wx = camX + x;
+                float wy = camY + y;
                 char c = getSymbol(noise.GetNoise(wx, wy));
 
-                // Patrol rendering
                 bool printed = false;
+                // Patrol render
                 for (auto &p : patrols)
                 {
-                    if (p.active)
+                    if (!p.active)
+                        continue;
+                    int px = (int)std::floor(p.wx);
+                    int py = (int)std::floor(p.wy);
+                    if (px == (int)std::floor(wx) && py == (int)std::floor(wy))
                     {
-                        int px = (int)std::floor(p.wx);
-                        int py = (int)std::floor(p.wy);
-                        if (px == (int)wx && py == (int)wy)
-                        {
-                            std::cout << 'P';
-                            printed = true;
-                            break;
-                        }
+                        std::cout << 'P';
+                        printed = true;
+                        break;
                     }
                 }
 
+                // Player render
                 if (!printed)
                 {
                     int px = (int)std::floor(cx);
                     int py = (int)std::floor(cy);
-                    if (px == (int)wx && py == (int)wy)
+                    if (px == (int)std::floor(wx) && py == (int)std::floor(wy))
                         std::cout << 'X';
                     else
                         std::cout << c;
@@ -189,8 +189,7 @@ int main()
                                         [](auto &p)
                                         { return p.active; });
 
-        std::cout << "World pos: (" << cx << ", " << cy << ") | "
-                  << "Chunk: (" << chunkX << ", " << chunkY << ") | "
+        std::cout << "Pos: (" << cx << ", " << cy << ")  "
                   << "Active patrols: " << activeCount << "\n";
 
         usleep(16000); // ~60 FPS
